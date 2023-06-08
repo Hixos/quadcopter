@@ -1,0 +1,11 @@
+[package]
+name = "drone"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+anyhow = "1.0.71"
+control_system = { git = "https://github.com/Hixos/control-systems-rs.git" }
+eframe = "0.22.0"
+plotter = { git = "https://github.com/Hixos/rust-data-inspector.git" }
