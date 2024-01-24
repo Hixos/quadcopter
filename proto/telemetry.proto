@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package telemetry.data;
+
+message Sample {
+    uint64 id = 1;
+    double time = 2;
+    double value = 3;
+}
+

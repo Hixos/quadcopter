@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+
+package telemetry.rpc;
+
+service TelemetryConnector {
+  // Sends a greeting
+  rpc ListTelemetries (TelemetryListRequest) returns (TelemetryListReply) {}
+}
+
+message TelemetryListRequest {
+  string base_topic = 1;
+}
+
+message TelemetryListReply {
+  message Telemetry {
+    uint64 id = 1;
+    string name = 2;
+  }
+  
+  repeated Telemetry telemetries = 1;
+}

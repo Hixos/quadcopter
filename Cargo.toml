@@ -3,10 +3,27 @@ name = "drone"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["telemetry_plotter"]
 
 [dependencies]
 anyhow = "1.0.71"
-control_system = { git = "https://github.com/Hixos/control-systems-rs.git" }
-eframe = "0.22.0"
+bytes = "1.5.0"
+control_system = { git = "https://github.com/Hixos/control-systems-rs.git", features = ["blocks", "plotter"]}
 nalgebra = "0.32.2"
-plotter = { git = "https://github.com/Hixos/rust-data-inspector.git" }
+rust_data_inspector_signals = { git = "https://github.com/Hixos/rust-data-inspector.git" }
+rust_data_inspector = { git = "https://github.com/Hixos/rust-data-inspector.git", optional = true}
+tokio = { version = "1.35.1", features = ["full"] }
+tonic = { version = "0.10.2", features = ["transport"] }
+thiserror = "1.0.56"
+prost = "0.12.3"
+serde = { version = "1.0.195", features = ["derive"] }
+rand = "0.8.5"
+
+[features]
+local_plots = ["dep:rust_data_inspector"]
+
+[build-dependencies]
+# prost-build = "0.12.3"
+tonic-build = "0.10.2"
+
