@@ -45,7 +45,18 @@ impl<T: AsF64Signals + Default> ProtoPlotter<T> {
 
 impl<T: Clone + AsF64Signals + 'static> Block for ProtoPlotter<T> {
     fn step(&mut self, k: StepInfo) -> Result<StepResult, ControlSystemError> {
-        // self.u.get().values().into_iter().enumerate().for_each(|(i, v)| self.senders.);
+        self.u
+            .get()
+            .values()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, v)| {
+                let _ = self.senders[i].try_send(Sample {
+                    id: self.ids[i].as_u64(),
+                    time: k.t,
+                    value: v,
+                });
+            });
 
         Ok(StepResult::Continue)
     }

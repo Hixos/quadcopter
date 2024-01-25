@@ -1,14 +1,21 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tonic::{transport::Server, Request, Response, Status};
-
-use crate::telemetry::rpc::telemetry_connector_server::TelemetryConnectorServer;
+use tokio::{
+    select,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot, watch,
+    },
+    time::sleep,
+};
+use tokio_util::sync::CancellationToken;
+use tonic::{Request, Response, Status};
 
 use super::{
     data::Sample,
     rpc::{
-        telemetry_connector_server::TelemetryConnector, TelemetryListReply, TelemetryListRequest,
+        start_telemetry_reply, telemetry_connector_server::TelemetryConnector, StartTelemetryReply,
+        StartTelemetryRequest, TelemetryListReply, TelemetryListRequest,
     },
 };
 
@@ -27,6 +34,12 @@ struct TelemetryEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TelemetryID(u64);
+
+impl TelemetryID {
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
 
 impl TelemetryServiceBuilder {
     pub fn register_signal(
@@ -51,14 +64,29 @@ impl TelemetryServiceBuilder {
     }
 
     pub fn build(self) -> anyhow::Result<TelemetryService> {
-        Ok(TelemetryService {
-            telemetries: self.telemetries,
-        })
+        Ok(TelemetryService::new(self.telemetries))
     }
 }
 
 pub struct TelemetryService {
     telemetries: HashMap<String, TelemetryEntry>,
+    stop_tx: watch::Sender<()>,
+    stop_rx: watch::Receiver<()>,
+}
+
+impl TelemetryService {
+    fn new(telemetries: HashMap<String, TelemetryEntry>) -> Self {
+        let (stop_tx, stop_rx) = watch::channel(());
+        Self {
+            telemetries,
+            stop_tx,
+            stop_rx,
+        }
+    }
+
+    pub fn stop_server(&self) {
+        self.stop_tx.send(()).unwrap();
+    }
 }
 
 #[tonic::async_trait]
@@ -78,5 +106,45 @@ impl TelemetryConnector for TelemetryService {
                 })
                 .collect(),
         }))
+    }
+
+    async fn start_telemetry(
+        &self,
+        request: Request<StartTelemetryRequest>,
+    ) -> Result<Response<StartTelemetryReply>, Status> {
+        let port = request.get_ref().port;
+        println!("Received start telemetry request! port: {port}");
+
+        let mut stop_rx = self.stop_rx.clone();
+
+        let token = CancellationToken::new();
+        let _drop_guard = token.clone().drop_guard();
+
+        let select_task = tokio::spawn(async move {
+            select! {
+                    _ = Self::send_telemetry(port) => {
+                        StartTelemetryReply { stop_reason: start_telemetry_reply::StopReason::TelemetryEnded as i32 }
+                    },
+                    _ = stop_rx.changed() => {
+                        println!("Connection closed by server");
+                        StartTelemetryReply { stop_reason: start_telemetry_reply::StopReason::TelemetryEnded as i32 }
+                    }
+                    _ = token.cancelled() => {
+                        println!("Connection closed by client");
+                        StartTelemetryReply { stop_reason: start_telemetry_reply::StopReason::TelemetryEnded as i32 }
+                    }
+            }
+        });
+
+        Ok(Response::new(select_task.await.unwrap()))
+    }
+}
+
+impl TelemetryService {
+    async fn send_telemetry(port: u32) {
+        loop {
+            println!("Sending telemetry to {port}!");
+            sleep(Duration::from_secs(1)).await;
+        }
     }
 }

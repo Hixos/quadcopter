@@ -1,31 +1,60 @@
-use std::{net::{Ipv4Addr, SocketAddrV4, UdpSocket}, str::FromStr, thread::{self, sleep}, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4, UdpSocket}, str::FromStr, thread, time::Duration
+};
 
-use bytes::{Bytes, BytesMut};
-use drone::telemetry::{data::Sample, rpc::{telemetry_connector_client::TelemetryConnectorClient, TelemetryListRequest}};
-use prost::Message;
 use anyhow::Result;
+use bytes::{Bytes, BytesMut};
+use drone::telemetry::{
+    data::Sample,
+    rpc::{
+        telemetry_connector_client::TelemetryConnectorClient, StartTelemetryRequest,
+        TelemetryListRequest,
+    },
+};
+use prost::Message;
+use tokio::{select, sync::oneshot, time::sleep};
 use tonic::Request;
 
-
 async fn async_main() -> Result<()> {
-    let mut client  = TelemetryConnectorClient::connect("http://127.0.0.1:65400").await?;
+    let mut client = TelemetryConnectorClient::connect("http://127.0.0.1:65400").await?;
 
-    let response = client.list_telemetries(Request::new(TelemetryListRequest { base_topic: "/".to_string() })).await?;
+    let telemetry_list_response = client
+        .list_telemetries(Request::new(TelemetryListRequest {
+            base_topic: "/".to_string(),
+        }))
+        .await?;
+    println!("{:?}", telemetry_list_response);
 
-    println!("{:?}", response);
+    select! {
+        response = client
+        .start_telemetry(Request::new(StartTelemetryRequest {
+            ids: vec![],
+            port: 1234,
+        }))
+        => {
+            if let Ok(response) = &response {
+                println!(
+                    "Telemetry terminated by server: {}",
+                    response.get_ref().stop_reason().as_str_name()
+                );
+            }
+            response.map(|_| ())
+       }
+       _ = sleep(Duration::from_secs(20)) => {Ok(())}
+    }?;
+
     Ok(())
 }
 
-fn main() -> Result<()>{
-    let rt = tokio::runtime::Builder::new_current_thread().enable_io().build()?;
+fn main() -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
 
-    let handle = thread::spawn(move || {
-         rt.block_on(async_main())
-    });
+    let handle = thread::spawn(move || rt.block_on(async_main()));
 
     handle.join().unwrap()
 
-    
     // let mut sample = Sample::default();
 
     // let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;

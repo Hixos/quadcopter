@@ -1,4 +1,4 @@
-use std::{path::Path, sync::mpsc::channel, thread::spawn};
+use std::{path::Path, sync::mpsc::channel, thread::spawn, time::Duration};
 
 use anyhow::Result;
 use control_system::blocks::{
@@ -18,7 +18,7 @@ use drone::telemetry::{
 };
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot::Receiver;
+use tokio::{sync::oneshot::Receiver, time::sleep};
 use tonic::transport::Server;
 
 #[derive(Serialize, Deserialize)]
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     let ts_builder = ts_builder_receiver.recv()?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
+        .enable_all()
         .build()?;
 
     let _ = rt.block_on(run_telemetry_server(run_end_receiver, ts_builder));
@@ -253,3 +253,16 @@ fn run_control_system(
     println!("Control system ended");
     Ok(())
 }
+
+// struct TelemetryServerController {
+    
+// }
+
+// impl TelemetryServerController {
+//     fn get_builder() -> Builder;
+//     fn start_server(builder: Builder) -> Result<()>;
+
+//     fn wait_for_client() -> String;
+//     fn get_clients();
+
+// }
