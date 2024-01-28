@@ -1,4 +1,9 @@
-use std::{path::Path, sync::mpsc::channel, thread::spawn, time::Duration};
+use std::{
+    path::Path,
+    sync::mpsc::channel,
+    thread::{sleep, spawn},
+    time::Duration,
+};
 
 use anyhow::Result;
 use control_system::blocks::{
@@ -12,14 +17,9 @@ use control_system::{
     Block, ControlSystemParameters, ParameterStore, StepInfo, StepResult,
 };
 use control_system::{BlockIO, ControlSystemBuilder};
-use drone::telemetry::{
-    add_protoplotter, rpc::telemetry_connector_server::TelemetryConnectorServer, TelemetryService,
-    TelemetryServiceBuilder,
-};
+use drone::telemetry::{add_protoplotter, TelemetryServiceBuilder};
 use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::oneshot::Receiver, time::sleep};
-use tonic::transport::Server;
 
 #[derive(Serialize, Deserialize)]
 struct CartParams {
@@ -94,30 +94,13 @@ fn main() -> Result<()> {
         Ok(())
     });
 
-
     let ts_builder = ts_builder_receiver.recv()?;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+    let mut ts = ts_builder.build()?;
 
-    let _ = rt.block_on(run_telemetry_server(run_end_receiver, ts_builder));
+    ts.blocking_serve("127.0.0.1:65400".parse().unwrap())?;
 
     handle.join().unwrap()?;
-    Ok(())
-}
-
-async fn run_telemetry_server(run_end_receiver: Receiver<()>, ts_builder: TelemetryServiceBuilder) -> Result<()> {
-    let addr: std::net::SocketAddr = "127.0.0.1:65400".parse().unwrap();
-    let telem_service = ts_builder.build()?;
-
-    println!("Telemetry Server listening on {}", addr);
-
-    Server::builder()
-        .add_service(TelemetryConnectorServer::new(telem_service))
-        .serve(addr)
-        .await?;
-
     Ok(())
 }
 
@@ -219,17 +202,16 @@ fn run_control_system(
 
     // Plotters
     // let mut signals = PlotSignals::default();
-    let mut ts_builder = TelemetryServiceBuilder::default();
+    let mut ts_builder = TelemetryServiceBuilder::new(100);
 
-    let channel_size = 100;
-    add_protoplotter::<f64>("/cart/pos", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/cart/vel", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/cart/acc", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/force", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/ref/pos", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/ref/vel", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/err/pos", channel_size, &mut builder, &mut ts_builder)?;
-    add_protoplotter::<f64>("/err/vel", channel_size, &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/cart/pos", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/cart/vel", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/cart/acc", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/force", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/ref/pos", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/ref/vel", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/err/pos", &mut builder, &mut ts_builder)?;
+    add_protoplotter::<f64>("/err/vel", &mut builder, &mut ts_builder)?;
 
     let _ = ts_builder_sender.send(ts_builder);
 
@@ -246,7 +228,9 @@ fn run_control_system(
     store.save()?;
 
     // Execute
-    while cs.step()? != StepResult::Stop {}
+    while cs.step()? != StepResult::Stop {
+        sleep(Duration::from_secs_f64(0.01));
+    }
 
     let _ = run_end_sender.send(());
 
@@ -255,7 +239,7 @@ fn run_control_system(
 }
 
 // struct TelemetryServerController {
-    
+
 // }
 
 // impl TelemetryServerController {

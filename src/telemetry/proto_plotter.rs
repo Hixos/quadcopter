@@ -25,12 +25,11 @@ impl<T: AsF64Signals + Default> ProtoPlotter<T> {
     pub fn new(
         name: &str,
         topic: &str,
-        channel_size: usize,
         builder: &mut TelemetryServiceBuilder,
     ) -> Self {
         let (ids, senders) = T::names()
             .into_iter()
-            .map(|name| builder.register_signal(&format!("{topic}{name}"), channel_size))
+            .map(|name| builder.register_signal(&format!("{topic}{name}")))
             .unzip();
 
         // let (id, sender) = , channel_size)
@@ -64,7 +63,6 @@ impl<T: Clone + AsF64Signals + 'static> Block for ProtoPlotter<T> {
 
 pub fn add_protoplotter<T>(
     signal_name: &str,
-    channel_size: usize,
     cs_builder: &mut ControlSystemBuilder,
     ts_builder: &mut TelemetryServiceBuilder,
 ) -> control_system::Result<()>
@@ -86,7 +84,7 @@ where
         rand_string
     );
 
-    let plotter = ProtoPlotter::<T>::new(name.as_str(), signal_name, channel_size, ts_builder);
+    let plotter = ProtoPlotter::<T>::new(name.as_str(), signal_name, ts_builder);
 
     cs_builder.add_block(plotter, &[("u", signal_name)], &[])?;
 

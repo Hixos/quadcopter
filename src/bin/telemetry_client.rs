@@ -1,9 +1,10 @@
 use std::{
-    net::{Ipv4Addr, SocketAddrV4, UdpSocket}, str::FromStr, thread, time::Duration
+    collections::HashMap,
+    sync::mpsc::{channel, Sender},
+    thread,
 };
 
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
 use drone::telemetry::{
     data::Sample,
     rpc::{
@@ -12,72 +13,82 @@ use drone::telemetry::{
     },
 };
 use prost::Message;
-use tokio::{select, sync::oneshot, time::sleep};
+use rust_data_inspector::DataInspector;
+use rust_data_inspector_signals::{PlotSampleSender, PlotSignalSample, PlotSignals};
+use tokio::{net::UdpSocket, select};
 use tonic::Request;
 
-async fn async_main() -> Result<()> {
+async fn async_main(signals_tx: Sender<PlotSignals>) -> Result<()> {
     let mut client = TelemetryConnectorClient::connect("http://127.0.0.1:65400").await?;
+
+    let mut signals = PlotSignals::default();
 
     let telemetry_list_response = client
         .list_telemetries(Request::new(TelemetryListRequest {
             base_topic: "/".to_string(),
         }))
         .await?;
-    println!("{:?}", telemetry_list_response);
 
+    let mut senders = HashMap::<u64, PlotSampleSender>::new();
+    for telem in telemetry_list_response.get_ref().telemetries.iter() {
+        let (_, sender) = signals.add_signal(&telem.name)?;
+        senders.insert(telem.id, sender);
+    }
+
+    signals_tx.send(signals).expect("Could not send signals!");
+
+    // if let Ok(response) = client
+    //     .start_telemetry(Request::new(StartTelemetryRequest {
+    //         ids: vec![],
+    //         port: 65432,
+    //     }))
+    //     .await
+    // {}
+    println!("Starting telemetry request!");
     select! {
         response = client
-        .start_telemetry(Request::new(StartTelemetryRequest {
-            ids: vec![],
-            port: 1234,
-        }))
-        => {
-            if let Ok(response) = &response {
-                println!(
-                    "Telemetry terminated by server: {}",
-                    response.get_ref().stop_reason().as_str_name()
-                );
-            }
-            response.map(|_| ())
-       }
-       _ = sleep(Duration::from_secs(20)) => {Ok(())}
-    }?;
+            .start_telemetry(Request::new(StartTelemetryRequest {
+                ids: vec![],
+                port: 65432,
+            })) => {println!("Received response '{response:?}' from server")},
+        _ = receive_telemetry(senders) => {}
+    }
 
     Ok(())
 }
 
+async fn receive_telemetry(mut plot_senders: HashMap<u64, PlotSampleSender>) -> Result<()> {
+    let sock = UdpSocket::bind(("127.0.0.1", 65432)).await?;
+    let mut buf = vec![0; 200];
+
+    loop {
+        let (nbytes, _) = sock.recv_from(&mut buf).await?;
+
+        if let Ok(sample) = Sample::decode(&buf[0..nbytes]) {
+
+            if let Some(sender) = plot_senders.get_mut(&sample.id) {
+                sender.send(PlotSignalSample {
+                    time: sample.time,
+                    value: sample.value,
+                })?;
+            } else {
+                println!("Wrong id! {}", sample.id);
+            }
+        }
+    }
+}
 fn main() -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
-    let handle = thread::spawn(move || rt.block_on(async_main()));
+    let (signals_tx, signals_rx) = channel();
+
+    let handle = thread::spawn(move || rt.block_on(async_main(signals_tx)));
+
+    let signals = signals_rx.recv()?;
+
+    DataInspector::run_native("Remote plotter", signals).unwrap();
 
     handle.join().unwrap()
-
-    // let mut sample = Sample::default();
-
-    // let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    // let dest_addr = SocketAddrV4::new(Ipv4Addr::from_str("127.0.0.1")?, 65500);
-    // socket.set_nonblocking(true)?;
-
-    // let mut i = 0;
-    // let mut buf: Vec<u8> = Vec::new();
-
-    // loop {
-    //     sample.id = i;
-    //     sample.time = i as f64;
-    //     sample.value = i as f64 * 10.0;
-
-    //     let len = sample.encoded_len();
-
-    //     buf.resize(len, 0);
-
-    //     sample.encode(&mut buf)?;
-
-    //     socket.send_to(buf.as_slice(), dest_addr)?;
-    //     sleep(Duration::from_millis(100));
-
-    //     i += 1;
-    // }
 }
