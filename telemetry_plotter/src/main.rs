@@ -19,7 +19,7 @@ use tokio::{net::UdpSocket, select};
 use tonic::Request;
 
 async fn async_main(signals_tx: Sender<PlotSignals>) -> Result<()> {
-    let mut client = TelemetryConnectorClient::connect("http://127.0.0.1:65400").await?;
+    let mut client = TelemetryConnectorClient::connect("http://192.168.1.24:65400").await?;
 
     let mut signals = PlotSignals::default();
 
@@ -51,7 +51,7 @@ async fn async_main(signals_tx: Sender<PlotSignals>) -> Result<()> {
 }
 
 async fn receive_telemetry(mut plot_senders: HashMap<u64, PlotSampleSender>) -> Result<()> {
-    let sock = UdpSocket::bind(("127.0.0.1", 65432)).await?;
+    let sock = UdpSocket::bind(("0.0.0.0", 65432)).await?;
     let mut buf = vec![0; 200];
 
     loop {

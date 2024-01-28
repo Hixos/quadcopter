@@ -13,3 +13,5 @@ pub mod telemetry {
     pub use proto_plotter::{add_protoplotter, ProtoPlotter};
     pub use telemetry_server::{TelemetryID, TelemetryGrpc, TelemetryServiceBuilder};
 }
+
+pub mod drivers;
