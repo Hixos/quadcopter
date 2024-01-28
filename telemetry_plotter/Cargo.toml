@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+drone = { path = ".."}
+tokio = "1.35.1"
+tonic = "0.10.2"
+rust_data_inspector = { git = "https://github.com/Hixos/rust-data-inspector.git"}
+rust_data_inspector_signals = { git = "https://github.com/Hixos/rust-data-inspector.git"}
+anyhow = "1.0.79"
+prost = "0.12.3"
