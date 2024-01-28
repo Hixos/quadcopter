@@ -81,7 +81,7 @@ impl TelemetryConnector for TelemetryGrpc {
         let port = request.get_ref().port;
         if port > 65535 {
             return Ok(Response::new(StartTelemetryReply {
-                stop_reason: start_telemetry_reply::StopReason::BadPort as i32,
+                stop_reason: start_telemetry_reply::StopReason::BadRequest as i32,
             }));
         }
         let port = port as u16;
@@ -93,26 +93,42 @@ impl TelemetryConnector for TelemetryGrpc {
         let token = CancellationToken::new();
         let _drop_guard = token.clone().drop_guard();
 
+        // Bind socket use to send UDP telemetry
         if let Ok(socket) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await {
-            let _ = self
-                .subscriber_tx
+            let subscriber_tx = self.subscriber_tx.clone();
+
+            // Notify new subscribers
+            if subscriber_tx
                 .send(TelemetrySubscriptionCmd::New(addr, socket))
-                .await;
+                .await.is_err()
+            {
+                // Error creating telemetry subscription, notify the client
+                return Ok(Response::new(StartTelemetryReply {
+                    stop_reason: start_telemetry_reply::StopReason::Unavailable as i32,
+                }));
+            }
 
-            token.cancelled().await;
+            // Cancellation task
+            let handle = tokio::spawn(async move {
+                token.cancelled().await;
 
-            println!("Connection from {addr} dropped");
-            let _ = self
-                .subscriber_tx
-                .send(TelemetrySubscriptionCmd::Drop(addr))
-                .await;
+                println!("Connection dropped: {addr}");
 
-            Ok(Response::new(StartTelemetryReply {
-                stop_reason: start_telemetry_reply::StopReason::TelemetryEnded as i32,
-            }))
+                // Notify subscription dropped
+                let _ = subscriber_tx
+                    .send(TelemetrySubscriptionCmd::Drop(addr))
+                    .await;
+
+                // In case we were the ones dropping the subscription, notify the client
+                Ok(Response::new(StartTelemetryReply {
+                    stop_reason: start_telemetry_reply::StopReason::Closed as i32,
+                }))
+            });
+
+            handle.await.unwrap()
         } else {
             Ok(Response::new(StartTelemetryReply {
-                stop_reason: start_telemetry_reply::StopReason::BadPort as i32,
+                stop_reason: start_telemetry_reply::StopReason::BadRequest as i32,
             }))
         }
     }

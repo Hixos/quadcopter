@@ -28,8 +28,9 @@ message StartTelemetryRequest {
 
 message StartTelemetryReply {
   enum StopReason {
-    TELEMETRY_ENDED = 0;
-    BAD_PORT = 1;
+    CLOSED = 0;
+    BAD_REQUEST = 1;
+    UNAVAILABLE = 2;
   }
 
   StopReason stop_reason = 1;

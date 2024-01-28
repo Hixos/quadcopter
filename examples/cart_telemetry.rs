@@ -237,16 +237,3 @@ fn run_control_system(
     println!("Control system ended");
     Ok(())
 }
-
-// struct TelemetryServerController {
-
-// }
-
-// impl TelemetryServerController {
-//     fn get_builder() -> Builder;
-//     fn start_server(builder: Builder) -> Result<()>;
-
-//     fn wait_for_client() -> String;
-//     fn get_clients();
-
-// }

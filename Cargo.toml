@@ -12,8 +12,7 @@ bytes = "1.5.0"
 control_system = { git = "https://github.com/Hixos/control-systems-rs.git", features = ["blocks", "plotter"]}
 nalgebra = "0.32.2"
 rust_data_inspector_signals = { git = "https://github.com/Hixos/rust-data-inspector.git" }
-# rust_data_inspector = { git = "https://github.com/Hixos/rust-data-inspector.git", optional = true}
-rust_data_inspector = { git = "https://github.com/Hixos/rust-data-inspector.git"}
+rust_data_inspector = { git = "https://github.com/Hixos/rust-data-inspector.git", optional = true}
 tokio = { version = "1.35.1", features = ["full"] }
 tonic = { version = "0.10.2", features = ["transport"] }
 thiserror = "1.0.56"
@@ -22,9 +21,8 @@ serde = { version = "1.0.195", features = ["derive"] }
 rand = "0.8.5"
 tokio-util = "0.7.10"
 
-# [features]
-# local_plots = ["dep:rust_data_inspector"]
+[features]
+local_plots = ["dep:rust_data_inspector"]
 
 [build-dependencies]
 tonic-build = "0.10.2"
-
