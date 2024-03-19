@@ -33,14 +33,13 @@
 
 #define HX_LIS3MDL_NUM_ODR 9
 static int hx_lis3mdl_odr_list[] = { HX_LIS3MDL_ODR_0_625, HX_LIS3MDL_ODR_1_25,
-			      HX_LIS3MDL_ODR_2_5,   HX_LIS3MDL_ODR_5,
-			      HX_LIS3MDL_ODR_10,    HX_LIS3MDL_ODR_20,
-			      HX_LIS3MDL_ODR_40,    HX_LIS3MDL_ODR_80,
-			      HX_LIS3MDL_ODR_155 };
-
+				     HX_LIS3MDL_ODR_2_5,   HX_LIS3MDL_ODR_5,
+				     HX_LIS3MDL_ODR_10,	   HX_LIS3MDL_ODR_20,
+				     HX_LIS3MDL_ODR_40,	   HX_LIS3MDL_ODR_80,
+				     HX_LIS3MDL_ODR_155 };
 
 #define HX_LIS3MDL_NUM_FS 4
-static int hx_lis3mdl_fs_list[] = { 4, 8, 12, 16};			
+static int hx_lis3mdl_fs_list[] = { 4, 8, 12, 16 };
 
 enum hx_lis3mdl_registers {
 	HX_LIS3MDL_REG_WHO_AM_I = 0x0F,
@@ -176,8 +175,8 @@ static int hx_lis3mdl_configure(struct iio_dev *indio_dev)
 	if (err < 0)
 		goto configure_error;
 
-	// Single conversion mode, low power mode disabled
-	err = regmap_write(regmap, HX_LIS3MDL_REG_CTRL_REG_3, 0x01);
+	// Continuous conversion mode, low power mode disabled
+	err = regmap_write(regmap, HX_LIS3MDL_REG_CTRL_REG_3, 0x00);
 	if (err < 0)
 		goto configure_error;
 
@@ -186,6 +185,14 @@ static int hx_lis3mdl_configure(struct iio_dev *indio_dev)
 configure_error:
 	dev_err(&indio_dev->dev, "Could not configure device: %d", err);
 	return err;
+}
+
+static int hx_lis3mdl_update_bits(struct iio_dev *indio_dev, unsigned int reg,
+				  unsigned int mask, unsigned int value)
+{
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	return regmap_update_bits(sdata->regmap, reg, mask,
+				  value << __ffs(mask));
 }
 
 static int hx_lis3mdl_sensor_init(struct iio_dev *indio_dev)
@@ -211,7 +218,8 @@ ssize_t hx_lis3mdl_sysfs_sampling_frequency_avail(struct device *dev,
 
 	for (i = 0; i < HX_LIS3MDL_NUM_ODR; i++) {
 		len += scnprintf(buf + len, PAGE_SIZE - len, "%d.%d ",
-				 hx_lis3mdl_odr_list[i] / 1000, hx_lis3mdl_odr_list[i] % 1000);
+				 hx_lis3mdl_odr_list[i] / 1000,
+				 hx_lis3mdl_odr_list[i] % 1000);
 	}
 	buf[len - 1] = '\n';
 
@@ -220,19 +228,20 @@ ssize_t hx_lis3mdl_sysfs_sampling_frequency_avail(struct device *dev,
 static IIO_DEV_ATTR_SAMP_FREQ_AVAIL(hx_lis3mdl_sysfs_sampling_frequency_avail);
 
 ssize_t hx_lis3mdl_sysfs_scale_avail(struct device *dev,
-				struct device_attribute *attr, char *buf)
+				     struct device_attribute *attr, char *buf)
 {
 	int i, len = 0;
 
 	for (i = 0; i < HX_LIS3MDL_NUM_FS; i++) {
-		len += scnprintf(buf + len, PAGE_SIZE - len, "%d ", hx_lis3mdl_fs_list[i]);
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%d ",
+				 hx_lis3mdl_fs_list[i]);
 	}
 	buf[len - 1] = '\n';
 
 	return len;
 }
-static IIO_DEVICE_ATTR(in_magn_scale_available, S_IRUGO, hx_lis3mdl_sysfs_scale_avail, NULL , 0);
-
+static IIO_DEVICE_ATTR(in_magn_scale_available, S_IRUGO,
+		       hx_lis3mdl_sysfs_scale_avail, NULL, 0);
 
 static struct attribute *hx_lis3mdl_attributes[] = {
 	&iio_dev_attr_sampling_frequency_available.dev_attr.attr,
@@ -259,6 +268,48 @@ static int hx_lis3mdl_read_axis(struct iio_dev *indio_dev,
 
 read_error:
 	return err;
+}
+
+static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_mhz)
+{
+	int bits;
+	switch (odr_mhz) {
+	case HX_LIS3MDL_ODR_0_625:
+		bits = HX_LIS3MDL_ODR_BITS_0_625;
+		break;
+	case HX_LIS3MDL_ODR_1_25:
+		bits = HX_LIS3MDL_ODR_BITS_1_25;
+		break;
+	case HX_LIS3MDL_ODR_2_5:
+		bits = HX_LIS3MDL_ODR_BITS_2_5;
+		break;
+	case HX_LIS3MDL_ODR_5:
+		bits = HX_LIS3MDL_ODR_BITS_5;
+		break;
+	case HX_LIS3MDL_ODR_10:
+		bits = HX_LIS3MDL_ODR_BITS_10;
+		break;
+	case HX_LIS3MDL_ODR_20:
+		bits = HX_LIS3MDL_ODR_BITS_20;
+		break;
+	case HX_LIS3MDL_ODR_40:
+		bits = HX_LIS3MDL_ODR_BITS_40;
+		break;
+	case HX_LIS3MDL_ODR_80:
+		bits = HX_LIS3MDL_ODR_BITS_80;
+		break;
+	case HX_LIS3MDL_ODR_155:
+		bits = HX_LIS3MDL_ODR_BITS_155;
+		break;
+	default:
+		dev_warn(&indio_dev->dev, "Unrecognized data rate: %d",
+			 odr_mhz);
+		return -EINVAL;
+	}
+	dev_info(&indio_dev->dev, "Update bits: %02X", bits);
+
+	return hx_lis3mdl_update_bits(indio_dev, HX_LIS3MDL_REG_CTRL_REG_1,
+				      0x1E, bits);
 }
 
 static int hx_lis3mdl_read_raw(struct iio_dev *indio_dev,
@@ -295,17 +346,16 @@ static int hx_lis3mdl_write_raw(struct iio_dev *indio_dev,
 				struct iio_chan_spec const *chan, int val,
 				int val2, long mask)
 {
-	// switch (mask) {
+	switch (mask) {
 	// case IIO_CHAN_INFO_SCALE:
 	// 	return st_sensors_set_fullscale_by_gain(indio_dev, val2);
-	// case IIO_CHAN_INFO_SAMP_FREQ:
-	// 	if (val2)
-	// 		return -EINVAL;
-
-	// 	return st_sensors_set_odr(indio_dev, val);
-	// default:
-	return -EINVAL;
-	// }
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		dev_info(&indio_dev->dev, "val1: %d, val2: %d", val, val2);
+		return hx_lis3mdl_write_odr(indio_dev,
+					    val * 1000 + val2 / 1000);
+	default:
+		return -EINVAL;
+	}
 }
 
 static const struct iio_info hx_lis3mdl_info = {
