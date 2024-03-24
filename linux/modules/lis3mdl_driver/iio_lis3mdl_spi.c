@@ -6,10 +6,17 @@
 
 #include "iio_lis3mdl_spi.h"
 
+// Scale values
 #define HX_LIS3MDL_SCALE_MICRO_4G 146
 #define HX_LIS3MDL_SCALE_MICRO_8G 292
 #define HX_LIS3MDL_SCALE_MICRO_12G 437
 #define HX_LIS3MDL_SCALE_MICRO_16G 584
+
+// Scale register bits
+#define HX_LIS3MDL_SCALE_BITS_4G 0b00
+#define HX_LIS3MDL_SCALE_BITS_8G 0b01
+#define HX_LIS3MDL_SCALE_BITS_12G 0b10
+#define HX_LIS3MDL_SCALE_BITS_16G 0b11
 
 #define HX_LIS3MDL_ODR_0_625 625
 #define HX_LIS3MDL_ODR_1_25 1250
@@ -39,7 +46,10 @@ static int hx_lis3mdl_odr_list[] = { HX_LIS3MDL_ODR_0_625, HX_LIS3MDL_ODR_1_25,
 				     HX_LIS3MDL_ODR_155 };
 
 #define HX_LIS3MDL_NUM_FS 4
-static int hx_lis3mdl_fs_list[] = { 4, 8, 12, 16 };
+static int hx_lis3mdl_fs_list[] = { HX_LIS3MDL_SCALE_MICRO_4G,
+				    HX_LIS3MDL_SCALE_MICRO_8G,
+				    HX_LIS3MDL_SCALE_MICRO_12G,
+				    HX_LIS3MDL_SCALE_MICRO_16G };
 
 enum hx_lis3mdl_registers {
 	HX_LIS3MDL_REG_WHO_AM_I = 0x0F,
@@ -233,7 +243,7 @@ ssize_t hx_lis3mdl_sysfs_scale_avail(struct device *dev,
 	int i, len = 0;
 
 	for (i = 0; i < HX_LIS3MDL_NUM_FS; i++) {
-		len += scnprintf(buf + len, PAGE_SIZE - len, "%d ",
+		len += scnprintf(buf + len, PAGE_SIZE - len, "0.000%d ",
 				 hx_lis3mdl_fs_list[i]);
 	}
 	buf[len - 1] = '\n';
@@ -270,10 +280,12 @@ read_error:
 	return err;
 }
 
-static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_mhz)
+static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_milli_hz)
 {
+	struct hx_lis3mdl_data *mdata = iio_priv(indio_dev);
+	mdata->odr = odr_milli_hz;
 	int bits;
-	switch (odr_mhz) {
+	switch (odr_milli_hz) {
 	case HX_LIS3MDL_ODR_0_625:
 		bits = HX_LIS3MDL_ODR_BITS_0_625;
 		break;
@@ -303,13 +315,39 @@ static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_mhz)
 		break;
 	default:
 		dev_warn(&indio_dev->dev, "Unrecognized data rate: %d",
-			 odr_mhz);
+			 odr_milli_hz);
 		return -EINVAL;
 	}
-	dev_info(&indio_dev->dev, "Update bits: %02X", bits);
 
 	return hx_lis3mdl_update_bits(indio_dev, HX_LIS3MDL_REG_CTRL_REG_1,
 				      0x1E, bits);
+}
+
+static int hx_lis3mdl_write_scale(struct iio_dev *indio_dev, int gain)
+{
+	struct hx_lis3mdl_data *mdata = iio_priv(indio_dev);
+	mdata->gain = gain;
+	int bits;
+	switch (gain) {
+	case HX_LIS3MDL_SCALE_MICRO_4G:
+		bits = HX_LIS3MDL_SCALE_BITS_4G;
+		break;
+	case HX_LIS3MDL_SCALE_MICRO_8G:
+		bits = HX_LIS3MDL_SCALE_BITS_8G;
+		break;
+	case HX_LIS3MDL_SCALE_MICRO_12G:
+		bits = HX_LIS3MDL_SCALE_BITS_12G;
+		break;
+	case HX_LIS3MDL_SCALE_MICRO_16G:
+		bits = HX_LIS3MDL_SCALE_BITS_16G;
+		break;
+	default:
+		dev_err(&indio_dev->dev, "Unrecognized scale: %d", gain);
+		return -EINVAL;
+	}
+
+	return hx_lis3mdl_update_bits(indio_dev, HX_LIS3MDL_REG_CTRL_REG_2,
+				      0x60, bits);
 }
 
 static int hx_lis3mdl_read_raw(struct iio_dev *indio_dev,
@@ -347,8 +385,9 @@ static int hx_lis3mdl_write_raw(struct iio_dev *indio_dev,
 				int val2, long mask)
 {
 	switch (mask) {
-	// case IIO_CHAN_INFO_SCALE:
-	// 	return st_sensors_set_fullscale_by_gain(indio_dev, val2);
+	case IIO_CHAN_INFO_SCALE:
+		dev_info(&indio_dev->dev, "val1: %d, val2: %d", val, val2);
+		return hx_lis3mdl_write_scale(indio_dev, val2);
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		dev_info(&indio_dev->dev, "val1: %d, val2: %d", val, val2);
 		return hx_lis3mdl_write_odr(indio_dev,
