@@ -199,7 +199,7 @@ static int hx_lis3mdl_configure(struct iio_dev *indio_dev)
 	return 0;
 
 configure_error:
-	dev_err(&indio_dev->dev, "Could not configure device: %d", err);
+	dev_err(&indio_dev->dev, "Could not configure device: %d\n", err);
 	return err;
 }
 
@@ -320,7 +320,7 @@ static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_milli_hz)
 		bits = HX_LIS3MDL_ODR_BITS_155;
 		break;
 	default:
-		dev_warn(&indio_dev->dev, "Unrecognized data rate: %d",
+		dev_err(&indio_dev->dev, "Unrecognized data rate: %d\n",
 			 odr_milli_hz);
 		return -EINVAL;
 	}
@@ -348,7 +348,7 @@ static int hx_lis3mdl_write_scale(struct iio_dev *indio_dev, int gain)
 		bits = HX_LIS3MDL_SCALE_BITS_16G;
 		break;
 	default:
-		dev_err(&indio_dev->dev, "Unrecognized scale: %d", gain);
+		dev_err(&indio_dev->dev, "Unrecognized scale: %d\n", gain);
 		return -EINVAL;
 	}
 
@@ -392,10 +392,8 @@ static int hx_lis3mdl_write_raw(struct iio_dev *indio_dev,
 {
 	switch (mask) {
 	case IIO_CHAN_INFO_SCALE:
-		dev_info(&indio_dev->dev, "val1: %d, val2: %d", val, val2);
 		return hx_lis3mdl_write_scale(indio_dev, val2);
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		dev_info(&indio_dev->dev, "val1: %d, val2: %d", val, val2);
 		return hx_lis3mdl_write_odr(indio_dev,
 					    val * 1000 + val2 / 1000);
 	default:
@@ -423,6 +421,8 @@ static int hx_lis3mdl_buffer_postenable(struct iio_dev *indio_dev)
 {
 	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
 	sdata->enabled = true;
+	unsigned int buf;
+	regmap_read(sdata->regmap, HX_LIS3MDL_REG_OUT_X_L, &buf);
 	return 0;
 }
 
@@ -578,7 +578,6 @@ irqreturn_t hx_lis3mdl_trigger_handler(int irq, void *p)
 	}
 	iio_push_to_buffers_with_timestamp(indio_dev, sdata->buffer_data,
 					   timestamp);
-
 hx_lis3mdl_buf_err:
 	iio_trigger_notify_done(indio_dev->trig);
 
@@ -593,10 +592,24 @@ static int hx_lis3mdl_allocate_ring(struct iio_dev *indio_dev)
 					       &hx_lis3mdl_buffer_setup_ops);
 }
 
+void hx_lis3mdl_dev_name_probe(struct device *dev, char *name, int len)
+{
+	const void *match;
+
+	match = device_get_match_data(dev);
+	if (!match)
+		return;
+
+	/* The name from the match takes precedence if present */
+	strscpy(name, match, len);
+}
+
 static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 {
 	pr_info("Hello kernel!\n");
 	int err;
+
+	hx_lis3mdl_dev_name_probe(&spi->dev, spi->modalias, sizeof(spi->modalias));
 
 	struct hx_lis3mdl_data *mdata;
 	struct iio_dev *indio_dev;
@@ -634,13 +647,14 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 	if (err < 0)
 		return err;
 
-	dev_info(&indio_dev->dev, "IRQ: %d", mdata->irq);
+	dev_info(&indio_dev->dev, "IRQ: %d\n", mdata->irq);
 	if (mdata->irq > 0) {
 		err = hx_lis3mdl_allocate_trigger(indio_dev,
 						  &hx_lis3mdl_trigger_ops);
 		if (err < 0)
 			return err;
 	}
+	dev_info(&indio_dev->dev, "Registering device!\n");
 	return devm_iio_device_register(indio_dev->dev.parent, indio_dev);
 }
 
