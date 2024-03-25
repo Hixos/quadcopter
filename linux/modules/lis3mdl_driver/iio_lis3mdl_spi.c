@@ -3,6 +3,11 @@
 #include <linux/iio/iio.h>
 #include <linux/spi/spi.h>
 #include <linux/iio/sysfs.h>
+#include <linux/iio/trigger.h>
+#include <linux/iio/buffer.h>
+#include <linux/iio/trigger_consumer.h>
+#include <linux/iio/triggered_buffer.h>
+#include <linux/interrupt.h>
 
 #include "iio_lis3mdl_spi.h"
 
@@ -80,6 +85,7 @@ MODULE_DEVICE_TABLE(of, hx_lis3mdl_of_match);
 static const struct regmap_config hx_lis3mdl_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
+	.read_flag_mask = 0xC0
 };
 
 #define HX_LIS3MDL_NUM_CHAN 4
@@ -404,6 +410,189 @@ static const struct iio_info hx_lis3mdl_info = {
 	// .debugfs_reg_access = &st_sensors_debugfs_reg_access,
 };
 
+int st_magn_trig_set_state(struct iio_trigger *trig, bool state)
+{
+	struct iio_dev *indio_dev = iio_trigger_get_drvdata(trig);
+
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	sdata->enabled = true;
+	return 0;
+}
+
+static int hx_lis3mdl_buffer_postenable(struct iio_dev *indio_dev)
+{
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	sdata->enabled = true;
+	return 0;
+}
+
+static int hx_lis3mdl_buffer_predisable(struct iio_dev *indio_dev)
+{
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	sdata->enabled = false;
+	return 0;
+}
+
+static int hx_lis3mdl_trig_set_state(struct iio_trigger *trig, bool state)
+{
+	return 0;
+}
+
+static int hx_lis3mdl_validate_device(struct iio_trigger *trig,
+				      struct iio_dev *indio_dev)
+{
+	struct iio_dev *indio = iio_trigger_get_drvdata(trig);
+
+	if (indio != indio_dev)
+		return -EINVAL;
+
+	return 0;
+}
+
+static irqreturn_t hx_lis3mdl_irq_handler(int irq, void *p)
+{
+	struct iio_trigger *trig = p;
+	struct iio_dev *indio_dev = iio_trigger_get_drvdata(trig);
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+
+	/* Get the time stamp as close in time as possible */
+	sdata->hw_timestamp = iio_get_time_ns(indio_dev);
+	return IRQ_WAKE_THREAD;
+}
+
+static irqreturn_t hx_lis3mdl_irq_thread(int irq, void *p)
+{
+	iio_trigger_poll_nested(p);
+	return IRQ_HANDLED;
+}
+
+static const struct iio_buffer_setup_ops hx_lis3mdl_buffer_setup_ops = {
+	.postenable = &hx_lis3mdl_buffer_postenable,
+	.predisable = &hx_lis3mdl_buffer_predisable,
+};
+
+static const struct iio_trigger_ops hx_lis3mdl_trigger_ops = {
+	.set_trigger_state = &hx_lis3mdl_trig_set_state,
+	.validate_device = &hx_lis3mdl_validate_device,
+};
+
+int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
+				const struct iio_trigger_ops *trigger_ops)
+{
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	struct device *parent = indio_dev->dev.parent;
+	unsigned long irq_trig;
+	int err;
+
+	sdata->trig =
+		devm_iio_trigger_alloc(parent, "%s-trigger", indio_dev->name);
+	if (sdata->trig == NULL) {
+		dev_err(&indio_dev->dev, "failed to allocate iio trigger.\n");
+		return -ENOMEM;
+	}
+
+	iio_trigger_set_drvdata(sdata->trig, indio_dev);
+	sdata->trig->ops = trigger_ops;
+
+	irq_trig = irqd_get_trigger_type(irq_get_irq_data(sdata->irq));
+
+	switch (irq_trig) {
+	case IRQF_TRIGGER_FALLING:
+	case IRQF_TRIGGER_LOW:
+		dev_err(&indio_dev->dev,
+			"falling/low specified for IRQ but hardware supports only rising/high: will request rising/high\n");
+		if (irq_trig == IRQF_TRIGGER_FALLING)
+			irq_trig = IRQF_TRIGGER_RISING;
+		if (irq_trig == IRQF_TRIGGER_LOW)
+			irq_trig = IRQF_TRIGGER_HIGH;
+		break;
+	case IRQF_TRIGGER_RISING:
+		dev_info(&indio_dev->dev, "interrupts on the rising edge\n");
+		break;
+	case IRQF_TRIGGER_HIGH:
+		dev_info(&indio_dev->dev, "interrupts active high level\n");
+		break;
+	default:
+		/* This is the most preferred mode, if possible */
+		dev_err(&indio_dev->dev,
+			"unsupported IRQ trigger specified (%lx), enforce rising edge\n",
+			irq_trig);
+		irq_trig = IRQF_TRIGGER_RISING;
+	}
+
+	/* Tell the interrupt handler that we're dealing with edges */
+	if (irq_trig != IRQF_TRIGGER_FALLING &&
+	    irq_trig != IRQF_TRIGGER_RISING) {
+		/*
+		 * If we're not using edges (i.e. level interrupts) we
+		 * just mask off the IRQ, handle one interrupt, then
+		 * if the line is still low, we return to the
+		 * interrupt handler top half again and start over.
+		 */
+		irq_trig |= IRQF_ONESHOT;
+	}
+
+	err = devm_request_threaded_irq(parent, sdata->irq,
+					hx_lis3mdl_irq_handler,
+					hx_lis3mdl_irq_thread, irq_trig,
+					sdata->trig->name, sdata->trig);
+	if (err) {
+		dev_err(&indio_dev->dev, "failed to request trigger IRQ.\n");
+		return err;
+	}
+
+	err = devm_iio_trigger_register(parent, sdata->trig);
+	if (err < 0) {
+		dev_err(&indio_dev->dev, "failed to register iio trigger.\n");
+		return err;
+	}
+	indio_dev->trig = iio_trigger_get(sdata->trig);
+
+	return 0;
+}
+
+irqreturn_t hx_lis3mdl_trigger_handler(int irq, void *p)
+{
+	struct iio_poll_func *pf = p;
+	struct iio_dev *indio_dev = pf->indio_dev;
+	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
+	s64 timestamp;
+
+	if (iio_trigger_using_own(indio_dev))
+		timestamp = sdata->hw_timestamp;
+	else
+		timestamp = iio_get_time_ns(indio_dev);
+
+	u8 *buf = sdata->buffer_data;
+	int i;
+
+	for_each_set_bit(i, indio_dev->active_scan_mask, 3) {
+		const struct iio_chan_spec *channel = &indio_dev->channels[i];
+
+		if (regmap_bulk_read(sdata->regmap, channel->address, buf, 2) <
+		    0)
+			goto hx_lis3mdl_buf_err;
+
+		/* Advance the buffer pointer */
+		buf += 2;
+	}
+	iio_push_to_buffers_with_timestamp(indio_dev, sdata->buffer_data,
+					   timestamp);
+
+hx_lis3mdl_buf_err:
+	iio_trigger_notify_done(indio_dev->trig);
+
+	return IRQ_HANDLED;
+}
+
+static int hx_lis3mdl_allocate_ring(struct iio_dev *indio_dev)
+{
+	return devm_iio_triggered_buffer_setup(indio_dev->dev.parent, indio_dev,
+					       NULL,
+					       &hx_lis3mdl_trigger_handler,
+					       &hx_lis3mdl_buffer_setup_ops);
+}
+
 static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 {
 	pr_info("Hello kernel!\n");
@@ -425,6 +614,9 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 		return PTR_ERR(mdata->regmap);
 	}
 
+	spi_set_drvdata(spi, indio_dev);
+	mdata->irq = spi->irq;
+
 	mdata->gain = HX_LIS3MDL_SCALE_MICRO_4G;
 	mdata->odr = HX_LIS3MDL_ODR_0_625;
 
@@ -438,6 +630,17 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 	if (err < 0)
 		return err;
 
+	err = hx_lis3mdl_allocate_ring(indio_dev);
+	if (err < 0)
+		return err;
+
+	dev_info(&indio_dev->dev, "IRQ: %d", mdata->irq);
+	if (mdata->irq > 0) {
+		err = hx_lis3mdl_allocate_trigger(indio_dev,
+						  &hx_lis3mdl_trigger_ops);
+		if (err < 0)
+			return err;
+	}
 	return devm_iio_device_register(indio_dev->dev.parent, indio_dev);
 }
 
