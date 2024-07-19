@@ -408,14 +408,6 @@ static const struct iio_info hx_lis3mdl_info = {
 	// .debugfs_reg_access = &st_sensors_debugfs_reg_access,
 };
 
-int st_magn_trig_set_state(struct iio_trigger *trig, bool state)
-{
-	struct iio_dev *indio_dev = iio_trigger_get_drvdata(trig);
-
-	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
-	sdata->enabled = true;
-	return 0;
-}
 
 static int hx_lis3mdl_buffer_postenable(struct iio_dev *indio_dev)
 {
@@ -485,7 +477,7 @@ int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
 	int err;
 
 	sdata->trig =
-		devm_iio_trigger_alloc(parent, "%s-trigger", indio_dev->name);
+		devm_iio_trigger_alloc(parent, "%s-trigger", indio_dev->name, iio_device_id(indio_dev));
 	if (sdata->trig == NULL) {
 		dev_err(&indio_dev->dev, "failed to allocate iio trigger.\n");
 		return -ENOMEM;
@@ -493,6 +485,7 @@ int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
 
 	iio_trigger_set_drvdata(sdata->trig, indio_dev);
 	sdata->trig->ops = trigger_ops;
+	sdata->trig->dev.parent = &indio_dev->dev;
 
 	irq_trig = irqd_get_trigger_type(irq_get_irq_data(sdata->irq));
 
@@ -531,7 +524,6 @@ int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
 		 */
 		irq_trig |= IRQF_ONESHOT;
 	}
-
 	err = devm_request_threaded_irq(parent, sdata->irq,
 					hx_lis3mdl_irq_handler,
 					hx_lis3mdl_irq_thread, irq_trig,
@@ -606,7 +598,6 @@ void hx_lis3mdl_dev_name_probe(struct device *dev, char *name, int len)
 
 static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 {
-	pr_info("Hello kernel!\n");
 	int err;
 
 	hx_lis3mdl_dev_name_probe(&spi->dev, spi->modalias, sizeof(spi->modalias));
@@ -618,7 +609,7 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 	if (!indio_dev)
 		return -ENOMEM;
 
-	mdata = iio_priv(indio_dev);
+	struct hx_lis3mdl_data *mdata = iio_priv(indio_dev);
 
 	mdata->regmap = devm_regmap_init_spi(spi, &hx_lis3mdl_regmap_config);
 	if (IS_ERR(mdata->regmap)) {
@@ -667,7 +658,7 @@ MODULE_DEVICE_TABLE(spi, hx_lis3mdl_id_table);
 static struct spi_driver hx_lis3mdl_driver = {
     .driver =
         {
-            .name = "lis3mdl-spi",
+            .name = "hxlis3mdl",
             .of_match_table = hx_lis3mdl_of_match,
         },
     .probe = hx_lis3mdl_spi_probe,
