@@ -76,17 +76,16 @@ enum hx_lis3mdl_scan_index {
 };
 
 static const struct of_device_id hx_lis3mdl_of_match[] = {
-	{ .compatible = "hx,hxlis3mdl" },
+	{ .compatible = "hx,hxlis3mdl", .data = "lis3mdl" },
 	{}
 };
 
 MODULE_DEVICE_TABLE(of, hx_lis3mdl_of_match);
 
-static const struct regmap_config hx_lis3mdl_regmap_config = {
-	.reg_bits = 8,
-	.val_bits = 8,
-	.read_flag_mask = 0xC0
-};
+static const struct regmap_config hx_lis3mdl_regmap_config = { .reg_bits = 8,
+							       .val_bits = 8,
+							       .read_flag_mask =
+								       0xC0 };
 
 #define HX_LIS3MDL_NUM_CHAN 4
 static const struct iio_chan_spec hx_lis3mdl_channels[] = {
@@ -226,9 +225,8 @@ static int hx_lis3mdl_sensor_init(struct iio_dev *indio_dev)
 	return 0;
 }
 
-ssize_t hx_lis3mdl_sysfs_sampling_frequency_avail(struct device *dev,
-						  struct device_attribute *attr,
-						  char *buf)
+static ssize_t hx_lis3mdl_sysfs_sampling_frequency_avail(
+	struct device *dev, struct device_attribute *attr, char *buf)
 {
 	int i, len = 0;
 
@@ -243,8 +241,9 @@ ssize_t hx_lis3mdl_sysfs_sampling_frequency_avail(struct device *dev,
 }
 static IIO_DEV_ATTR_SAMP_FREQ_AVAIL(hx_lis3mdl_sysfs_sampling_frequency_avail);
 
-ssize_t hx_lis3mdl_sysfs_scale_avail(struct device *dev,
-				     struct device_attribute *attr, char *buf)
+static ssize_t hx_lis3mdl_sysfs_scale_avail(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
 {
 	int i, len = 0;
 
@@ -321,7 +320,7 @@ static int hx_lis3mdl_write_odr(struct iio_dev *indio_dev, int odr_milli_hz)
 		break;
 	default:
 		dev_err(&indio_dev->dev, "Unrecognized data rate: %d\n",
-			 odr_milli_hz);
+			odr_milli_hz);
 		return -EINVAL;
 	}
 
@@ -365,9 +364,14 @@ static int hx_lis3mdl_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
+		err = iio_device_claim_direct_mode(indio_dev);
+		if (err)
+			return err;
+
 		err = hx_lis3mdl_read_axis(indio_dev, ch, val);
+		iio_device_release_direct_mode(indio_dev);
 		if (err < 0)
-			goto read_error;
+			return err;
 
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
@@ -382,7 +386,6 @@ static int hx_lis3mdl_read_raw(struct iio_dev *indio_dev,
 		return -EINVAL;
 	}
 
-read_error:
 	return err;
 }
 
@@ -403,11 +406,9 @@ static int hx_lis3mdl_write_raw(struct iio_dev *indio_dev,
 
 static const struct iio_info hx_lis3mdl_info = {
 	.attrs = &hx_lis3mdl_attribute_group,
-	.read_raw = &hx_lis3mdl_read_raw,
-	.write_raw = &hx_lis3mdl_write_raw
-	// .debugfs_reg_access = &st_sensors_debugfs_reg_access,
+	.read_raw = hx_lis3mdl_read_raw,
+	.write_raw = hx_lis3mdl_write_raw
 };
-
 
 static int hx_lis3mdl_buffer_postenable(struct iio_dev *indio_dev)
 {
@@ -454,6 +455,9 @@ static irqreturn_t hx_lis3mdl_irq_handler(int irq, void *p)
 
 static irqreturn_t hx_lis3mdl_irq_thread(int irq, void *p)
 {
+	struct iio_trigger *trig = p;
+	struct iio_dev *indio_dev = iio_trigger_get_drvdata(trig);
+
 	iio_trigger_poll_nested(p);
 	return IRQ_HANDLED;
 }
@@ -468,16 +472,19 @@ static const struct iio_trigger_ops hx_lis3mdl_trigger_ops = {
 	.validate_device = &hx_lis3mdl_validate_device,
 };
 
-int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
-				const struct iio_trigger_ops *trigger_ops)
+static int
+hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
+			    const struct iio_trigger_ops *trigger_ops)
 {
 	struct hx_lis3mdl_data *sdata = iio_priv(indio_dev);
 	struct device *parent = indio_dev->dev.parent;
 	unsigned long irq_trig;
 	int err;
 
-	sdata->trig =
-		devm_iio_trigger_alloc(parent, "%s-trigger", indio_dev->name, iio_device_id(indio_dev));
+	sdata->trig = devm_iio_trigger_alloc(parent, "%s-trigger%d",
+					     indio_dev->name,
+					     iio_device_id(indio_dev));
+
 	if (sdata->trig == NULL) {
 		dev_err(&indio_dev->dev, "failed to allocate iio trigger.\n");
 		return -ENOMEM;
@@ -485,7 +492,6 @@ int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
 
 	iio_trigger_set_drvdata(sdata->trig, indio_dev);
 	sdata->trig->ops = trigger_ops;
-	sdata->trig->dev.parent = &indio_dev->dev;
 
 	irq_trig = irqd_get_trigger_type(irq_get_irq_data(sdata->irq));
 
@@ -524,26 +530,29 @@ int hx_lis3mdl_allocate_trigger(struct iio_dev *indio_dev,
 		 */
 		irq_trig |= IRQF_ONESHOT;
 	}
+
 	err = devm_request_threaded_irq(parent, sdata->irq,
 					hx_lis3mdl_irq_handler,
 					hx_lis3mdl_irq_thread, irq_trig,
 					sdata->trig->name, sdata->trig);
+
 	if (err) {
 		dev_err(&indio_dev->dev, "failed to request trigger IRQ.\n");
 		return err;
 	}
 
 	err = devm_iio_trigger_register(parent, sdata->trig);
-	if (err < 0) {
+	if (err) {
 		dev_err(&indio_dev->dev, "failed to register iio trigger.\n");
 		return err;
 	}
+
 	indio_dev->trig = iio_trigger_get(sdata->trig);
 
 	return 0;
 }
 
-irqreturn_t hx_lis3mdl_trigger_handler(int irq, void *p)
+static irqreturn_t hx_lis3mdl_trigger_handler(int irq, void *p)
 {
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
@@ -584,7 +593,7 @@ static int hx_lis3mdl_allocate_ring(struct iio_dev *indio_dev)
 					       &hx_lis3mdl_buffer_setup_ops);
 }
 
-void hx_lis3mdl_dev_name_probe(struct device *dev, char *name, int len)
+static void hx_lis3mdl_dev_name_probe(struct device *dev, char *name, int len)
 {
 	const void *match;
 
@@ -600,7 +609,8 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 {
 	int err;
 
-	hx_lis3mdl_dev_name_probe(&spi->dev, spi->modalias, sizeof(spi->modalias));
+	hx_lis3mdl_dev_name_probe(&spi->dev, spi->modalias,
+				  sizeof(spi->modalias));
 
 	struct hx_lis3mdl_data *mdata;
 	struct iio_dev *indio_dev;
@@ -609,7 +619,7 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 	if (!indio_dev)
 		return -ENOMEM;
 
-	struct hx_lis3mdl_data *mdata = iio_priv(indio_dev);
+	mdata = iio_priv(indio_dev);
 
 	mdata->regmap = devm_regmap_init_spi(spi, &hx_lis3mdl_regmap_config);
 	if (IS_ERR(mdata->regmap)) {
@@ -635,22 +645,21 @@ static int hx_lis3mdl_spi_probe(struct spi_device *spi)
 		return err;
 
 	err = hx_lis3mdl_allocate_ring(indio_dev);
-	if (err < 0)
+	if (err)
 		return err;
 
-	dev_info(&indio_dev->dev, "IRQ: %d\n", mdata->irq);
+	dev_dbg(&indio_dev->dev, "IRQ: %d\n", mdata->irq);
 	if (mdata->irq > 0) {
 		err = hx_lis3mdl_allocate_trigger(indio_dev,
 						  &hx_lis3mdl_trigger_ops);
 		if (err < 0)
 			return err;
 	}
-	dev_info(&indio_dev->dev, "Registering device!\n");
 	return devm_iio_device_register(indio_dev->dev.parent, indio_dev);
 }
 
 static const struct spi_device_id hx_lis3mdl_id_table[] = {
-	{ "hxlis3mdl" },
+	{ "lis3mdl" },
 	{},
 };
 MODULE_DEVICE_TABLE(spi, hx_lis3mdl_id_table);
@@ -658,11 +667,11 @@ MODULE_DEVICE_TABLE(spi, hx_lis3mdl_id_table);
 static struct spi_driver hx_lis3mdl_driver = {
     .driver =
         {
-            .name = "hxlis3mdl",
+            .name = "iio_lis3mdl_spi:",
             .of_match_table = hx_lis3mdl_of_match,
         },
     .probe = hx_lis3mdl_spi_probe,
-    .id_table = hx_lis3mdl_id_table,
+    .id_table = hx_lis3mdl_id_table
 };
 module_spi_driver(hx_lis3mdl_driver);
 
