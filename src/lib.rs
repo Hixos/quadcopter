@@ -15,3 +15,4 @@ pub mod telemetry {
 }
 
 pub mod drivers;
+pub mod vector3;

@@ -1,0 +1,29 @@
+[cart.blocks.cart]
+mass = 5.0
+pos0 = 0.0
+vel0 = 0.0
+
+[cart.blocks.pid_pos]
+acc0 = 0.0
+kd = 0.0
+ki = 0.0
+kp = 1.0
+
+[cart.blocks.pid_vel]
+acc0 = 0.0
+kd = 0.0
+ki = 0.0
+kp = 1.0
+
+[cart.blocks.pos_delay]
+initial_values = [0.0]
+
+[cart.blocks.pos_ref]
+c = 15.0
+
+[cart.blocks.vel_delay]
+initial_values = [0.0]
+
+[cart.params]
+dt = 0.01
+max_iter = 10000

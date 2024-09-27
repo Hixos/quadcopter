@@ -8,3 +8,10 @@ message Sample {
     double value = 3;
 }
 
+message Test {
+    string test = 1;
+    Sample sample = 2;
+    repeated int32 vec_i32 = 3;
+    repeated Sample vec_sample = 4;
+}
+
